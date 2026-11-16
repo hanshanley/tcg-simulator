@@ -34,6 +34,7 @@ def test_real_episode_is_candidate_perspective_and_reset_releases_engine():
         for seed in (42, 44):
             observation, info = env.reset(seed=seed)
             assert observation["current"]["yourIndex"] == 0
+            assert observation["current"]["players"][1]["hand"] is None
             assert info["native_rng_seeded"] is False
             assert info["policy_seed"] == seed
             old_count = env.decisions
@@ -44,6 +45,13 @@ def test_real_episode_is_candidate_perspective_and_reset_releases_engine():
                 action, _ = choose("random", observation, rng)
                 observation, reward, terminated, truncated, info = env.step(action)
                 assert observation is None or observation["current"]["yourIndex"] == 0
+                if observation is not None:
+                    assert observation["current"]["players"][1]["hand"] is None
+                    assert all(
+                        log.get("playerIndex") == 0
+                        for log in observation["logs"]
+                        if log["type"] == 4
+                    )
                 assert reward == float(terminated and info["winner"] == 0)
                 if terminated or truncated:
                     break
@@ -121,6 +129,20 @@ def test_reward_denominator_includes_every_scheduled_outcome():
     assert summary["completion_rate"] == pytest.approx(3 / 5)
     assert summary["scheduled_games"] == 5
     assert summary["win_rate_ci95"][0] < 0.2 < summary["win_rate_ci95"][1]
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        {"status": "completed", "winner": False},
+        {"status": "completed"},
+        {"status": "completed", "winner": 2},
+        {"status": "failed", "winner": 0},
+    ],
+)
+def test_reward_summary_rejects_malformed_results(result):
+    with pytest.raises(ValueError):
+        reward_summary([result])
 
 
 @pytest.mark.parametrize(
@@ -202,6 +224,37 @@ def test_invalid_policy_actions_fail_without_disappearing_from_reward(tmp_path):
     assert all("Python integer" in row["error"] for row in results)
 
 
+def test_annotated_dataclass_policy_runs_in_isolated_games(tmp_path):
+    policy = tmp_path / "dataclass_policy.py"
+    policy.write_text(
+        "from __future__ import annotations\n"
+        "from dataclasses import dataclass\n"
+        "@dataclass\n"
+        "class State:\n"
+        "    steps: int = 0\n"
+        "state = State()\n"
+        "def select(observation, rng):\n"
+        "    state.steps += 1\n"
+        "    return list(range(observation['select']['minCount']))\n"
+    )
+    summary = evaluate(str(policy), tmp_path / "eval", games=2, workers=2)
+    assert summary["completed"] == 2 and summary["failed"] == 0
+
+
+@pytest.mark.parametrize("engine", [None, {"name": "CABT", "native_sha256": "incorrect"}])
+def test_completed_result_requires_matching_engine_provenance(tmp_path, monkeypatch, engine):
+    import backend.rl as module
+
+    def incomplete_result(config, policy, output, timeout, **kwargs):
+        output.mkdir()
+        return {"status": "completed", "winner": 0, "engine": engine}
+
+    monkeypatch.setattr(module, "_match", incomplete_result)
+    summary = evaluate("random", tmp_path / "eval", games=2)
+    assert summary["failed"] == summary["scheduled_games"] == 2
+    assert summary["wins"] == 0 and summary["reward"] == 0
+
+
 def test_policy_mutation_does_not_destroy_recorded_observations(tmp_path):
     policy = tmp_path / "mutating.py"
     policy.write_text(
@@ -267,8 +320,10 @@ def test_exported_verifier_runs_standalone_from_exact_entrypoint(tmp_path):
         check=True,
     )
     summary = json.loads((logs / "summary.json").read_text())
+    assert summary["status"] == "completed"
     assert summary["scheduled_games"] == summary["completed"] == 4
     assert float((logs / "reward.txt").read_text()) == summary["reward"]
+    assert json.loads((logs / "reward.json").read_text()) == {"reward": summary["reward"]}
     artifacts = logs / summary["evaluation_directory"]
     assert (artifacts / "manifest.json").is_file()
     assert len((artifacts / "games.jsonl").read_text().splitlines()) == 4
@@ -280,6 +335,59 @@ def test_verifier_missing_submission_always_writes_zero_reward(tmp_path):
     config = tmp_path / "config.json"
     config.write_text(json.dumps(evaluation_config(games=1)))
     output = tmp_path / "logs"
+    output.mkdir()
+    (output / "reward.json").write_text('{"reward": 1.0, "stale_metric": 123}\n')
+    (output / "summary.json").write_text('{"reward": 1.0, "status": "completed"}\n')
     summary = verify(config, str(tmp_path / "missing.py"), output)
     assert summary["reward"] == 0 and "error" in summary
     assert float((output / "reward.txt").read_text()) == 0
+    assert json.loads((output / "reward.json").read_text()) == {"reward": 0.0}
+    assert json.loads((output / "summary.json").read_text())["status"] == "failed"
+
+
+def test_verifier_resets_preferred_reward_before_evaluation(tmp_path, monkeypatch):
+    import backend.harbor as module
+
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps(evaluation_config(games=1)))
+    output = tmp_path / "logs"
+    output.mkdir()
+    (output / "reward.json").write_text('{"reward": 1.0}\n')
+    (output / "summary.json").write_text('{"reward": 1.0, "status": "completed"}\n')
+
+    def interrupted(*args, **kwargs):
+        assert json.loads((output / "reward.json").read_text()) == {"reward": 0.0}
+        assert json.loads((output / "summary.json").read_text())["status"] == "running"
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(module, "evaluate", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        verify(config, "random", output)
+    assert float((output / "reward.txt").read_text()) == 0
+
+
+def test_verifier_updates_both_reward_formats_on_success(tmp_path, monkeypatch):
+    import backend.harbor as module
+
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps(evaluation_config(games=1)))
+    monkeypatch.setattr(module, "evaluate", lambda *args, **kwargs: {"reward": 0.75})
+    output = tmp_path / "logs"
+    summary = verify(config, "random", output)
+    assert summary["status"] == "completed"
+    assert float((output / "reward.txt").read_text()) == 0.75
+    assert json.loads((output / "reward.json").read_text()) == {"reward": 0.75}
+
+
+@pytest.mark.parametrize("reward", [float("nan"), 1.5])
+def test_verifier_rejects_invalid_scores_without_publishing_them(tmp_path, monkeypatch, reward):
+    import backend.harbor as module
+
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps(evaluation_config(games=1)))
+    monkeypatch.setattr(module, "evaluate", lambda *args, **kwargs: {"reward": reward})
+    output = tmp_path / "logs"
+    summary = verify(config, "random", output)
+    assert summary["status"] == "failed"
+    assert summary["reward"] == 0 and "finite number" in summary["error"]
+    assert json.loads((output / "reward.json").read_text()) == {"reward": 0.0}

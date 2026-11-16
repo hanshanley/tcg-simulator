@@ -90,16 +90,31 @@ def game_config(config, index):
     }
 
 
+def validated_outcome(result):
+    if not isinstance(result, dict) or result.get("status") not in (
+        "completed",
+        "capped",
+        "failed",
+    ):
+        raise ValueError("Worker returned an invalid result status.")
+    if "winner" not in result:
+        raise ValueError("Worker result has no winner field.")
+    status, winner = result["status"], result["winner"]
+    if winner is not None and (type(winner) is not int or winner not in (0, 1)):
+        raise ValueError("Worker returned an invalid winner.")
+    if status != "completed" and winner is not None:
+        raise ValueError("Unfinished games cannot have a winner.")
+    return status, winner
+
+
 def reward_summary(games):
     counts = {key: 0 for key in ("wins", "losses", "draws", "failed", "capped")}
     for game in games:
-        status, winner = game["status"], game.get("winner")
+        status, winner = validated_outcome(game)
         if status == "completed":
             counts[{0: "wins", 1: "losses", None: "draws"}[winner]] += 1
-        elif status in ("failed", "capped"):
-            counts[status] += 1
         else:
-            raise ValueError(f"Unknown game status: {status}")
+            counts[status] += 1
     total = sum(counts.values())
     completed = counts["wins"] + counts["losses"] + counts["draws"]
     rate = counts["wins"] / total if total else 0.0
@@ -154,7 +169,7 @@ def _match(config, policy, output, timeout, *, runtime=ROOT):
             try:
                 process.wait(timeout=timeout)
             finally:
-                # Reap policy-spawned children too; process isolation is not a sandbox.
+                # Terminate leftover policy children too; this is not a sandbox.
                 try:
                     os.killpg(process.pid, signal.SIGKILL)
                 except ProcessLookupError:
@@ -163,19 +178,7 @@ def _match(config, policy, output, timeout, *, runtime=ROOT):
         if process.returncode:
             raise RuntimeError(f"Worker exited with code {process.returncode}; see worker.log.")
         result = json.loads((output / "result.json").read_text())
-        if not isinstance(result, dict) or result.get("status") not in (
-            "completed",
-            "capped",
-            "failed",
-        ):
-            raise ValueError("Worker returned an invalid result status.")
-        if "winner" not in result:
-            raise ValueError("Worker result has no winner field.")
-        winner = result["winner"]
-        if winner is not None and (type(winner) is not int or winner not in (0, 1)):
-            raise ValueError("Worker returned an invalid winner.")
-        if result["status"] != "completed" and winner is not None:
-            raise ValueError("Unfinished games cannot have a winner.")
+        validated_outcome(result)
     except (subprocess.TimeoutExpired, OSError, ValueError, RuntimeError) as error:
         result = {
             "status": "failed",
@@ -236,9 +239,13 @@ def evaluate(policy, output, **settings):
             config["timeout_seconds"],
             runtime=runtime,
         )
-        if result.get("engine") and result["engine"] != engine:
+        if result.get("engine") != engine and (
+            result["status"] != "failed" or result.get("engine") is not None
+        ):
             result.update(
-                status="failed", winner=None, error="Engine identity changed during batch."
+                status="failed",
+                winner=None,
+                error="Engine identity missing or changed during batch.",
             )
         result.update(game=index, protocol=protocol)
         result["reward"] = float(result["status"] == "completed" and result["winner"] == 0)

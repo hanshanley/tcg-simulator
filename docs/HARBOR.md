@@ -46,7 +46,8 @@ Each game runs in a fresh process. `--workers` bounds concurrent games, and the
 queue and aggregation do not hold every game in memory. The wall-clock limit
 includes policy imports, native initialization, and all policy calls. The
 decision limit counts **both players'** native selections. Worker process groups
-are reaped on completion/timeout; the evaluator targets Linux and macOS.
+are terminated on completion/timeout and the direct worker is reaped; the
+evaluator targets Linux and macOS.
 
 ## Rewards and artifacts
 
@@ -158,10 +159,13 @@ agent are not transferred. Extend the exported image in advance if your policy
 needs PyTorch or other packages; the initial contract is one self-contained
 policy file, not a multi-file model/weights bundle.
 
-Each verifier writes `/logs/verifier/reward.txt`, a full evaluation directory,
-and `/logs/verifier/summary.json`. A verification/setup error writes reward zero
-plus an explicit error, never a fabricated successful game. Tasks can run
-independently or concurrently; account for `task workers × concurrent trials`
+Each verifier writes `/logs/verifier/reward.json` (Harbor's preferred format),
+the matching `reward.txt`, a full evaluation directory, and `summary.json`.
+Both scores reset to zero before a run; a reused directory cannot retain a
+previous JSON score. Summary status is `running`, `completed`, or `failed`;
+interrupted runs do not inherit an earlier completed summary. A verification/setup
+error writes reward zero plus an explicit error, never a fabricated successful
+game. Tasks can run independently or concurrently; account for `task workers × concurrent trials`
 when sizing compute. Harbor's mean task reward equals overall game win rate
 when tasks contain equal numbers of games.
 
@@ -182,3 +186,6 @@ PYTHONPATH="$PWD" uv run --no-project --python 3.12 \
   --with harbor==0.26.0 --with pytest==8.4.2 \
   python -m pytest tests/test_harbor_contract.py
 ```
+
+See [the correctness audit](HARBOR_AUDIT.md) for reproduced defects, fixes, and
+the large-batch validation results.

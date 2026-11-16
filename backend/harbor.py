@@ -152,20 +152,35 @@ def export_tasks(output, *, tasks=1, **settings):
     return output
 
 
+def write_reward(output, value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("Reward must be a finite number in [0, 1].")
+    if not math.isfinite(value) or not 0 <= value <= 1:
+        raise ValueError("Reward must be a finite number in [0, 1].")
+    # Harbor prefers JSON over text; replace any previous canonical score first.
+    temporary = output / "reward.json.tmp"
+    temporary.write_text(json.dumps({"reward": value}) + "\n")
+    temporary.replace(output / "reward.json")
+    (output / "reward.txt").write_text(f"{value:.17g}\n")
+
+
 def verify(config_path, policy, output):
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
-    (output / "reward.txt").write_text("0\n")
+    write_reward(output, 0.0)
+    (output / "summary.json").write_text('{"status": "running", "reward": 0.0}\n')
     try:
         config = evaluation_config(**json.loads(Path(config_path).read_text()))
         directory = Path(tempfile.mkdtemp(prefix="evaluation-", dir=output))
         summary = evaluate(policy, directory / "run", **config)
+        summary["status"] = "completed"
         summary["evaluation_directory"] = str(directory.relative_to(output) / "run")
         (output / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
-        (output / "reward.txt").write_text(f"{summary['reward']:.17g}\n")
+        write_reward(output, summary["reward"])
         return summary
     except Exception as error:
-        failure = {"reward": 0.0, "error": f"{type(error).__name__}: {error}"}
+        failure = {"status": "failed", "reward": 0.0, "error": f"{type(error).__name__}: {error}"}
+        write_reward(output, 0.0)
         (output / "summary.json").write_text(json.dumps(failure, indent=2) + "\n")
         return failure
 

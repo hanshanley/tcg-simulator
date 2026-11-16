@@ -5,6 +5,7 @@ import copy
 import importlib.util
 import json
 import random
+import sys
 import time
 from pathlib import Path
 
@@ -20,7 +21,16 @@ def load_policy(spec):
     if module_spec is None or module_spec.loader is None:
         raise ValueError("Policy must be 'random', 'first', or a Python file.")
     module = importlib.util.module_from_spec(module_spec)
-    module_spec.loader.exec_module(module)
+    previous = sys.modules.get(module_spec.name)
+    sys.modules[module_spec.name] = module
+    try:
+        module_spec.loader.exec_module(module)
+    except BaseException:
+        if previous is None:
+            sys.modules.pop(module_spec.name, None)
+        else:
+            sys.modules[module_spec.name] = previous
+        raise
     if not callable(getattr(module, "select", None)):
         raise ValueError("Policy must define select(observation, rng).")
     return module.select
