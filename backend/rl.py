@@ -16,6 +16,15 @@ from backend.agents import agent_catalog
 from backend.engine import engine_identity, starter_deck
 
 ROOT = Path(__file__).resolve().parents[1]
+RUNTIME_FILES = (
+    "__init__.py",
+    "agents.py",
+    "engine.py",
+    "rl_env.py",
+    "rl_worker.py",
+    "rl.py",
+    "harbor.py",
+)
 
 
 def evaluation_config(
@@ -121,7 +130,7 @@ def reward_summary(games):
     }
 
 
-def _match(config, policy, output, timeout):
+def _match(config, policy, output, timeout, *, runtime=ROOT):
     output.mkdir()
     config_path = output / "config.json"
     config_path.write_text(json.dumps(config) + "\n")
@@ -137,7 +146,7 @@ def _match(config, policy, output, timeout):
                     policy,
                     str(output),
                 ],
-                cwd=ROOT,
+                cwd=runtime,
                 stdout=log,
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
@@ -197,6 +206,13 @@ def evaluate(policy, output, **settings):
         identity = {"name": source.name, "artifact_sha256": hashlib.sha256(body).hexdigest()}
         policy = str(frozen)
     engine = engine_identity()
+    runtime = output / "runtime"
+    (runtime / "backend").mkdir(parents=True)
+    runtime_hashes = {}
+    for name in RUNTIME_FILES:
+        body = (ROOT / "backend" / name).read_bytes()
+        (runtime / "backend" / name).write_bytes(body)
+        runtime_hashes[name] = hashlib.sha256(body).hexdigest()
     manifest = {
         "schema": "tcg-policy-evaluation-v1",
         "config": config,
@@ -204,17 +220,7 @@ def evaluate(policy, output, **settings):
         "engine": engine,
         "python_version": sys.version,
         "native_rng_seeded": False,
-        "runtime_sha256": {
-            name: hashlib.sha256((Path(__file__).parent / name).read_bytes()).hexdigest()
-            for name in (
-                "rl.py",
-                "rl_env.py",
-                "rl_worker.py",
-                "agents.py",
-                "engine.py",
-                "harbor.py",
-            )
-        },
+        "runtime_sha256": runtime_hashes,
     }
     (output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     started = time.monotonic()
@@ -223,7 +229,17 @@ def evaluate(policy, output, **settings):
 
     def run(index):
         protocol = game_config(config, index)
-        result = _match(protocol, policy, game_root / f"{index:07d}", config["timeout_seconds"])
+        result = _match(
+            protocol,
+            policy,
+            game_root / f"{index:07d}",
+            config["timeout_seconds"],
+            runtime=runtime,
+        )
+        if result.get("engine") and result["engine"] != engine:
+            result.update(
+                status="failed", winner=None, error="Engine identity changed during batch."
+            )
         result.update(game=index, protocol=protocol)
         result["reward"] = float(result["status"] == "completed" and result["winner"] == 0)
         (game_root / f"{index:07d}" / "result.json").write_text(json.dumps(result) + "\n")

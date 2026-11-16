@@ -9,6 +9,7 @@ from pathlib import Path
 
 from backend.engine import ENGINE_VERSION
 from backend.rl import (
+    RUNTIME_FILES,
     add_evaluation_arguments,
     evaluate,
     evaluation_config,
@@ -16,16 +17,6 @@ from backend.rl import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
-RUNTIME_FILES = (
-    "__init__.py",
-    "agents.py",
-    "engine.py",
-    "rl_env.py",
-    "rl_worker.py",
-    "rl.py",
-    "harbor.py",
-)
-
 DOCKERFILE = f"""FROM python:3.12-slim-bookworm
 RUN apt-get update && apt-get install -y --no-install-recommends libstdc++6 libgomp1 \\
     && apt-get clean

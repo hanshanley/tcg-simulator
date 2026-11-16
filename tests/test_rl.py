@@ -172,6 +172,10 @@ def test_real_parallel_policy_batch_pins_inputs_and_candidate_only_rollouts(tmp_
     assert (output / "policy.py").read_bytes() == source.read_bytes()
     assert manifest["engine"]["rules_version"] == 2
     assert manifest["native_rng_seeded"] is False
+    for name, digest in manifest["runtime_sha256"].items():
+        assert (
+            hashlib.sha256((output / "runtime/backend" / name).read_bytes()).hexdigest() == digest
+        )
     for row in games:
         path = output / "games" / f"{row['game']:07d}" / "rollout.jsonl"
         transitions = [json.loads(line) for line in path.read_text().splitlines()]
@@ -202,6 +206,8 @@ def test_policy_mutation_does_not_destroy_recorded_observations(tmp_path):
     policy = tmp_path / "mutating.py"
     policy.write_text(
         "def select(observation, rng):\n"
+        "    import backend\n"
+        "    assert '/runtime/backend/' in backend.__file__.replace('\\\\', '/')\n"
         "    selection = observation['select']\n"
         "    result = list(range(selection['minCount']))\n"
         "    observation.clear()\n"

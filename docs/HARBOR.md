@@ -65,6 +65,7 @@ Every evaluation creates a new directory containing:
 | --- | --- |
 | `manifest.json` | Frozen decks, budgets, opponent schedule, policy hash, runtime source hashes, native engine/platform identity, Python version |
 | `policy.py` | Frozen submitted file, when evaluating a custom policy |
+| `runtime/backend/` | Complete frozen adapter sources actually used by game workers |
 | `summary.json` | Reward, wins/losses/draws, caps/failures, completion rate, descriptive 95% Wilson interval |
 | `games.jsonl` | One result and complete match protocol per scheduled game |
 | `games/<id>/` | Per-game configuration, result, worker log, optional candidate transitions |
