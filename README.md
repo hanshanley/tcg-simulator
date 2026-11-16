@@ -131,9 +131,9 @@ cannot supply its in-memory partial trace; previously saved games remain intact.
 ## Validation
 
 ```sh
-uv run --locked pytest
-uv run --locked ruff check backend tests
-uv run --locked ruff format --check backend tests
+uv run --locked python -m pytest
+uv run --locked ruff check backend tests examples/policies
+uv run --locked ruff format --check backend tests examples/policies
 npm run check
 npm run format:check
 npm run build
