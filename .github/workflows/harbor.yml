@@ -1,0 +1,69 @@
+name: Harbor RL integration
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --locked
+      - name: Simulator tests and lint
+        run: |
+          uv run --locked python -m pytest
+          uv run --locked ruff check backend tests examples/policies
+          uv run --locked ruff format --check backend tests examples/policies
+      - name: Actual Harbor contracts
+        run: |
+          PYTHONPATH="$PWD" uv run --no-project --python 3.12 \
+            --with harbor==0.26.0 --with pytest==8.4.2 \
+            python -m pytest tests/test_harbor_contract.py
+      - name: Export a real-engine Harbor smoke task
+        run: |
+          uv run --locked python -m backend.harbor export \
+            --games 4 --workers 2 --rollouts --output data/harbor-tasks
+      - name: Full Harbor policy-agent and separate-verifier trial
+        run: |
+          PYTHONPATH="$PWD" uvx --python 3.12 --from harbor==0.26.0 harbor run \
+            --path data/harbor-tasks \
+            --agent backend.harbor_agent:PolicyAgent \
+            --ak policy_path="$PWD/examples/policies/random_policy.py" \
+            --n-concurrent 1 --jobs-dir data/harbor-jobs
+      - name: Verify the trial actually produced a valid reward
+        run: |
+          uv run --locked python - <<'PY'
+          import json
+          from pathlib import Path
+          results = [
+              json.loads(path.read_text())
+              for path in Path("data/harbor-jobs").rglob("result.json")
+          ]
+          trials = [result for result in results if "trial_name" in result]
+          assert len(trials) == 1, results
+          trial = trials[0]
+          assert trial["exception_info"] is None, trial
+          assert trial["verifier_environment_mode"] == "separate", trial
+          assert 0 <= trial["verifier_result"]["rewards"]["reward"] <= 1, trial
+          summaries = list(Path("data/harbor-jobs").rglob("summary.json"))
+          evaluations = [
+              json.loads(path.read_text()) for path in summaries
+              if "scheduled_games" in json.loads(path.read_text())
+          ]
+          assert evaluations, summaries
+          assert all(result["scheduled_games"] == result["completed"] == 4 for result in evaluations)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: harbor-trial
+          path: data/harbor-jobs/
+          if-no-files-found: ignore

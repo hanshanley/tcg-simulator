@@ -76,6 +76,28 @@ The displayed interval is a descriptive per-experiment Wilson interval.
 Do not treat comparisons across different decks, opponents, or budgets as
 controlled improvements. Baseline agents are intentionally simple, not competitive.
 
+## Harbor and reinforcement learning
+
+Evaluate a Python policy over many isolated games with a failure-inclusive
+win-rate reward, or export standalone Harbor tasks:
+
+```sh
+uv run --locked python -m backend.rl \
+  --policy examples/policies/random_policy.py --games 1024 --workers 8 \
+  --output data/rl/checkpoint-001
+
+uv run --locked python -m backend.harbor export \
+  --tasks 4 --games 256 --workers 4 --output data/harbor-tasks
+```
+
+The integration includes a `reset`/`step` environment, legal-action validation,
+candidate-only rollout exports, frozen policy/engine/configuration fingerprints,
+and `backend.harbor_agent:PolicyAgent` for existing trained policy files.
+Reward is **wins / all scheduled games**; failures and caps earn zero rather
+than disappearing. This is the CABT rules/card pool, not current Standard.
+See [the Harbor/RL guide](docs/HARBOR.md) for the policy contract, Harbor commands,
+training semantics, and limitations.
+
 ## Architecture
 
 ```text
