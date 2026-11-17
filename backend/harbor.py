@@ -31,7 +31,7 @@ VERIFY_SCRIPT = """#!/bin/bash
 set -euo pipefail
 tests_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 export PYTHONPATH="$tests_dir/runtime"
-exec python -m backend.harbor verify \\
+exec python -P -m backend.harbor verify \\
   --config "$tests_dir/evaluation.json" \\
   --policy "${1:-/app/policy.py}" \\
   --output "${2:-/logs/verifier}"
@@ -165,7 +165,7 @@ def write_reward(output, value):
 
 
 def verify(config_path, policy, output):
-    output = Path(output)
+    output = Path(output).resolve()
     output.mkdir(parents=True, exist_ok=True)
     write_reward(output, 0.0)
     (output / "summary.json").write_text('{"status": "running", "reward": 0.0}\n')

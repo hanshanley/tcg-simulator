@@ -85,3 +85,28 @@ do not transfer automatically. Policies are trusted code: subprocesses are
 crash/timeout isolation, not a security sandbox or anti-cheating guarantee.
 Exact native replay and comprehensive correctness of all upstream card effects
 are outside this audit's claims. No website deployment is part of this change.
+
+## Follow-up fixes: November 17, 2026
+
+Four additional correctness defects were reproduced and fixed:
+
+| Finding | Reproduction | Fix |
+| --- | --- | --- |
+| Native card-ID wrapping | Adding or subtracting `2**32` from every card ID still ran the original deck through the C binding. Recorded input IDs therefore did not describe the cards played. | Share nonnegative signed-32-bit deck validation between the RL environment and studio worker, before passing IDs to native code. Unknown but representable IDs remain subject to the native engine's deck validation. |
+| Concurrent cold initialization | Eight concurrent cold loads executed the native-wrapper initializer eight times in a mocked-loader reproduction. The cached function alone did not serialize first calls. | Serialize access to the cached initializer, preserving one native-wrapper instance and consistent module pairs per process. The regression uses a mocked loader rather than racing the real native initializer. |
+| Exported verifier import shadowing | Running the exported script from a directory containing an unrelated `backend/harbor.py` imported that file instead of the exported runtime. | Launch Python with safe-path mode and the explicit exported runtime path. Regression executes the actual verifier from a shadowing directory. |
+| Relative output loses a valid reward | On Python 3.12, `verify(..., output="logs")` completed evaluation but failed to relate an absolute temporary directory to the relative output path, reporting zero reward. | Resolve the output directory before creating artifacts. Check both direct verification and the standalone script with caller-relative paths. |
+
+Validation: **59 tests passed, 1 optional Harbor module skipped**; Ruff lint and
+format checks passed. Six regression cases failed before the initial fixes; a
+separate relative-output regression then reproduced the fourth defect before
+its fix. Representable unknown IDs `0`, `999999`, and `2147483647` were also
+checked in isolated workers: each failed explicitly as a rejected deck, without
+a native crash.
+
+A fresh **1,024-game** batch completed with **349 wins**, **675 losses**,
+**zero failures/caps/draws**, and reward **0.3408203125**. Every result,
+configuration, schedule entry, policy/runtime hash, engine identity, and
+aggregate reward was independently checked; each opponent/choice-order stratum
+contained 256 games. Local artifacts:
+`data/rl/harbor-followup-20261117-1024/`.

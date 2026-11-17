@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 
 from backend.agents import choose
-from backend.engine import engine_identity, load_engine
+from backend.engine import engine_identity, load_engine, validate_decks
 
 
 def run_match(config: dict) -> dict:
@@ -17,6 +17,7 @@ def run_match(config: dict) -> dict:
     rngs = [random.Random(config["policy_seed"] + player) for player in range(2)]
     observation = None
     try:
+        validate_decks(config["decks"])
         observation, start = game.battle_start(
             config["decks"][0], config["decks"][1], config["reverse"]
         )

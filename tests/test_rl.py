@@ -158,6 +158,8 @@ def test_reward_summary_rejects_malformed_results(result):
         {"opponents": []},
         {"opponents": ["missing"]},
         {"decks": [[True] * 60, starter_deck()]},
+        {"decks": [[card + 2**32 for card in starter_deck()], starter_deck()]},
+        {"decks": [[card - 2**32 for card in starter_deck()], starter_deck()]},
         {"rollouts": "yes"},
     ],
 )
@@ -302,17 +304,22 @@ def test_exported_verifier_runs_standalone_from_exact_entrypoint(tmp_path):
     first = json.loads((task / "tests/evaluation.json").read_text())
     second = json.loads((exported / "tcg-policy-0001/tests/evaluation.json").read_text())
     assert second["policy_seed"] >= first["policy_seed"] + first["games"] * 2
-    empty_cwd = tmp_path / "empty-cwd"
-    empty_cwd.mkdir()
-    logs = tmp_path / "logs"
+    caller = tmp_path / "caller"
+    caller.mkdir()
+    (caller / "backend").mkdir()
+    (caller / "backend/__init__.py").write_text("")
+    (caller / "backend/harbor.py").write_text(
+        'raise RuntimeError("The caller backend must not override the exported verifier.")\n'
+    )
+    logs = caller / "logs"
     subprocess.run(
         [
             "bash",
             str(task / "tests/test.sh"),
-            str(task / "environment/example_policy.py"),
-            str(logs),
+            os.path.relpath(task / "environment/example_policy.py", caller),
+            "logs",
         ],
-        cwd=empty_cwd,
+        cwd=caller,
         env={**os.environ, "PATH": f"{Path(sys.executable).parent}:{os.environ['PATH']}"},
         capture_output=True,
         text=True,
@@ -366,14 +373,15 @@ def test_verifier_resets_preferred_reward_before_evaluation(tmp_path, monkeypatc
     assert float((output / "reward.txt").read_text()) == 0
 
 
-def test_verifier_updates_both_reward_formats_on_success(tmp_path, monkeypatch):
+def test_verifier_updates_both_reward_formats_with_relative_output(tmp_path, monkeypatch):
     import backend.harbor as module
 
     config = tmp_path / "config.json"
     config.write_text(json.dumps(evaluation_config(games=1)))
     monkeypatch.setattr(module, "evaluate", lambda *args, **kwargs: {"reward": 0.75})
     output = tmp_path / "logs"
-    summary = verify(config, "random", output)
+    monkeypatch.chdir(tmp_path)
+    summary = verify(config, "random", "logs")
     assert summary["status"] == "completed"
     assert float((output / "reward.txt").read_text()) == 0.75
     assert json.loads((output / "reward.json").read_text()) == {"reward": 0.75}

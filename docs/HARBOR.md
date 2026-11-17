@@ -35,6 +35,8 @@ objects. Optional/empty/multiple selections respect the native `minCount` and
 reset between games; policies may retain state across decisions within a game.
 An evaluation freezes a copy of the policy file before launching workers.
 Additional model libraries must already be installed in the evaluation runtime.
+Deck inputs must contain nonnegative signed-32-bit integer IDs; oversized IDs
+are rejected rather than silently wrapped by the native binding.
 
 Candidate is always player 0. Opponents alternate in pairs: random with each
 choice order, then first-choice with each choice order. Multiples of four games
@@ -136,6 +138,9 @@ Task seeds use disjoint policy-RNG streams. Outputs contain complete runtime
 sources, frozen decks/configuration, a Dockerfile that installs the pinned
 upstream engine, instructions, an example solution, and a verifier. No local
 database, web server, Kaggle account, or external model API is required.
+The verifier imports its exported runtime even when the caller's working
+directory contains another `backend` package. Relative policy/output paths
+remain relative to the caller's working directory.
 
 From the repository root, evaluate an existing policy:
 

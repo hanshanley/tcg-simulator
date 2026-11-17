@@ -165,7 +165,15 @@ def test_restart_marks_unfinished_runs_interrupted(tmp_path):
         runner.close()
 
 
-def test_native_invalid_deck_failure_is_recorded(tmp_path):
+@pytest.mark.parametrize(
+    "cards",
+    [
+        [3] * 60,
+        [card + 2**32 for card in starter_deck()],
+        [card - 2**32 for card in starter_deck()],
+    ],
+)
+def test_native_invalid_deck_failure_is_recorded(tmp_path, cards):
     from backend.runner import Runner
 
     runner = Runner(Store(tmp_path))
@@ -173,7 +181,7 @@ def test_native_invalid_deck_failure_is_recorded(tmp_path):
         result = runner._match(
             {
                 "agents": ["random", "first"],
-                "decks": [[3] * 60, starter_deck()],
+                "decks": [cards, starter_deck()],
                 "reverse": False,
                 "policy_seed": 42,
                 "max_decisions": 10,

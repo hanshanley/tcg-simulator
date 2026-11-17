@@ -5,16 +5,23 @@ import importlib.util
 import json
 import platform
 import sys
+import threading
 import types
 from functools import lru_cache
 from pathlib import Path
 
 ENGINE_VERSION = "1.33.3"
 ADAPTER_VERSION = "1"
+_ENGINE_LOCK = threading.Lock()
+
+
+def load_engine():
+    with _ENGINE_LOCK:
+        return _load_engine()
 
 
 @lru_cache
-def load_engine():
+def _load_engine():
     distribution = importlib.metadata.distribution("kaggle-environments")
     root = Path(distribution.locate_file("kaggle_environments/envs/cabt/cg"))
     package_name = "_studio_cabt"
@@ -27,6 +34,22 @@ def load_engine():
         sys.modules[spec.name] = module
         spec.loader.exec_module(module)
     return sys.modules[f"{package_name}.sim"], sys.modules[f"{package_name}.game"]
+
+
+def validate_decks(decks):
+    if (
+        not isinstance(decks, list)
+        or len(decks) != 2
+        or any(
+            not isinstance(deck, list)
+            or len(deck) != 60
+            or any(type(card) is not int or not 0 <= card <= 2**31 - 1 for card in deck)
+            for deck in decks
+        )
+    ):
+        raise ValueError(
+            "Decks must be two 60-card lists of nonnegative 32-bit integer CABT card IDs."
+        )
 
 
 def engine_identity():

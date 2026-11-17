@@ -5,7 +5,7 @@ import random
 import threading
 
 from backend.agents import choose
-from backend.engine import engine_identity, load_engine, starter_deck
+from backend.engine import engine_identity, load_engine, starter_deck, validate_decks
 
 _BATTLE_LOCK = threading.Lock()
 
@@ -37,17 +37,7 @@ class CABTEnv:
         if type(reverse) is not bool:
             raise ValueError("reverse must be a boolean.")
         self.decks = copy.deepcopy(decks if decks is not None else [starter_deck(), starter_deck()])
-        if (
-            not isinstance(self.decks, list)
-            or len(self.decks) != 2
-            or any(
-                not isinstance(deck, list)
-                or len(deck) != 60
-                or any(type(card) is not int for card in deck)
-                for deck in self.decks
-            )
-        ):
-            raise ValueError("Supply two 60-card lists of integer CABT card IDs.")
+        validate_decks(self.decks)
         self.opponent = opponent
         self.max_decisions = max_decisions
         self.reverse = reverse
